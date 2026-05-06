@@ -13,8 +13,25 @@ enum ScanMode:Int{
 }
 
 public class SwiftFlutterBarcodeScannerPlugin: NSObject, FlutterPlugin, ScanBarcodeDelegate,FlutterStreamHandler {
-    
-    public static var viewController = UIViewController()
+
+    // Resolved at access time so we work under the UIScene lifecycle that
+    // Flutter adopted in 3.32+. Under UIScene, AppDelegate has no `window`
+    // (it lives on UIWindowScene), so the previous force-unwrap in
+    // register(with:) crashed with EXC_BAD_INSTRUCTION on launch.
+    public static var viewController: UIViewController {
+        if #available(iOS 13.0, *) {
+            let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+            let activeScene = scenes.first(where: { $0.activationState == .foregroundActive }) ?? scenes.first
+            if let window = activeScene?.windows.first(where: { $0.isKeyWindow }) ?? activeScene?.windows.first,
+               let rootVC = window.rootViewController {
+                return rootVC
+            }
+        }
+        if let rootVC = (UIApplication.shared.delegate?.window ?? nil)?.rootViewController {
+            return rootVC
+        }
+        return UIViewController()
+    }
     public static var lineColor:String=""
     public static var cancelButtonText:String=""
     public static var isShowFlashIcon:Bool=false
@@ -22,9 +39,8 @@ public class SwiftFlutterBarcodeScannerPlugin: NSObject, FlutterPlugin, ScanBarc
     public static var isContinuousScan:Bool=false
     static var barcodeStream:FlutterEventSink?=nil
     public static var scanMode = ScanMode.QR.index
-    
+
     public static func register(with registrar: FlutterPluginRegistrar) {
-        viewController = (UIApplication.shared.delegate?.window??.rootViewController)!
         let channel = FlutterMethodChannel(name: "flutter_barcode_scanner", binaryMessenger: registrar.messenger())
         let instance = SwiftFlutterBarcodeScannerPlugin()
         registrar.addMethodCallDelegate(instance, channel: channel)
@@ -554,9 +570,18 @@ class BarcodeScannerViewController: UIViewController {
     }
     
     var isLandscape: Bool {
-        return UIDevice.current.orientation.isValidInterfaceOrientation
-            ? UIDevice.current.orientation.isPortrait
-            : UIApplication.shared.statusBarOrientation.isPortrait
+        if UIDevice.current.orientation.isValidInterfaceOrientation {
+            return UIDevice.current.orientation.isPortrait
+        }
+        if #available(iOS 13.0, *),
+           let scene = UIApplication.shared.connectedScenes
+            .compactMap({ $0 as? UIWindowScene })
+            .first(where: { $0.activationState == .foregroundActive })
+            ?? UIApplication.shared.connectedScenes
+                .compactMap({ $0 as? UIWindowScene }).first {
+            return scene.interfaceOrientation.isPortrait
+        }
+        return true
     }
     
     private func launchApp(decodedURL: String) {
